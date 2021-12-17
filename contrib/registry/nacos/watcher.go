@@ -2,7 +2,6 @@ package nacos
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/go-kratos/kratos/v2/registry"
 	"github.com/nacos-group/nacos-sdk-go/clients/naming_client"
@@ -21,9 +20,10 @@ type watcher struct {
 	watchChan   chan struct{}
 	cli         naming_client.INamingClient
 	kind        string
+	filter      FilterFunc
 }
 
-func newWatcher(ctx context.Context, cli naming_client.INamingClient, serviceName, groupName, kind string, clusters []string) (*watcher, error) {
+func newWatcher(ctx context.Context, cli naming_client.INamingClient, serviceName, groupName, kind string, clusters []string, filter FilterFunc) (*watcher, error) {
 	w := &watcher{
 		serviceName: serviceName,
 		clusters:    clusters,
@@ -31,6 +31,7 @@ func newWatcher(ctx context.Context, cli naming_client.INamingClient, serviceNam
 		cli:         cli,
 		kind:        kind,
 		watchChan:   make(chan struct{}, 1),
+		filter:      filter,
 	}
 	w.ctx, w.cancel = context.WithCancel(ctx)
 
@@ -59,21 +60,8 @@ func (w *watcher) Next() ([]*registry.ServiceInstance, error) {
 	if err != nil {
 		return nil, err
 	}
-	items := make([]*registry.ServiceInstance, 0, len(res.Hosts))
-	for _, in := range res.Hosts {
-		kind := w.kind
-		if k, ok := in.Metadata["kind"]; ok {
-			kind = k
-		}
-		items = append(items, &registry.ServiceInstance{
-			ID:        in.InstanceId,
-			Name:      res.Name,
-			Version:   in.Metadata["version"],
-			Metadata:  in.Metadata,
-			Endpoints: []string{fmt.Sprintf("%s://%s:%d", kind, in.Ip, in.Port)},
-		})
-	}
-	return items, nil
+	opts := &FilterOptions{Kind: w.kind}
+	return w.filter(opts, res.Hosts), nil
 }
 
 func (w *watcher) Stop() error {
